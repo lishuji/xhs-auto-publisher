@@ -1,0 +1,25 @@
+# 环境配置
+.env
+
+# Cookie（含敏感登录信息）
+cookies/
+
+# 输出目录
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
