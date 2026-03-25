@@ -108,32 +108,105 @@ def publish_note(
             logger.info("📄 打开发布页面...")
             page.goto(
                 "https://creator.xiaohongshu.com/publish/publish",
-                wait_until="networkidle",
+                wait_until="domcontentloaded",
+                timeout=60000,
             )
-            time.sleep(2)
+            time.sleep(3)
 
             # 检查是否需要重新登录
             if "login" in page.url:
                 logger.error("❌ Cookie 已失效，请重新登录 (运行 login_and_save_cookies)")
                 return False
+            
+            # 2. 点击"上传图文"标签（页面默认是上传视频）
+            logger.info("🖱️  点击'上传图文'标签...")
+            try:
+                # 尝试多个选择器
+                image_tab_selectors = [
+                    "div.creator-tab:has-text('上传图文')",
+                    ".header-tabs div:has-text('上传图文')",
+                    "[class*='creator-tab']:has-text('上传图文')",
+                ]
+                
+                tab_clicked = False
+                for selector in image_tab_selectors:
+                    try:
+                        tab = page.query_selector(selector)
+                        if tab and tab.is_visible():
+                            tab.click()
+                            logger.success("✅ 已点击'上传图文'标签")
+                            tab_clicked = True
+                            time.sleep(2)
+                            break
+                    except:
+                        continue
+                
+                if not tab_clicked:
+                    logger.warning("⚠️ 未找到'上传图文'标签，尝试继续...")
+            except Exception as e:
+                logger.warning(f"⚠️ 点击标签失败: {e}，尝试继续...")
+            
+            # 截图以便调试
+            page.screenshot(path="output/debug_after_click_tab.png")
+            logger.info("📷 截图已保存: output/debug_after_click_tab.png")
 
-            # 2. 上传图片
+            # 3. 上传图片（逐个上传）
             logger.info(f"📸 上传 {len(image_paths)} 张图片...")
-            file_input = page.locator('input[type="file"]')
-            file_paths_str = [str(p) for p in image_paths]
-            file_input.set_input_files(file_paths_str)
+            for i, img_path in enumerate(image_paths, 1):
+                logger.info(f"📷 上传第 {i}/{len(image_paths)} 张图片...")
+                try:
+                    # 查找文件上传输入框
+                    file_input = page.locator('input[type="file"]').first
+                    file_input.set_input_files(str(img_path))
+                    logger.success(f"  ✅ 第 {i} 张图片已上传")
+                    time.sleep(2)  # 等待单张图片上传
+                except Exception as e:
+                    logger.error(f"  ❌ 上传第 {i} 张图片失败: {e}")
 
-            # 等待图片上传完成
-            logger.info("⏳ 等待图片上传...")
-            time.sleep(5)  # 根据图片大小可能需要更长时间
+            # 等待所有图片上传完成
+            logger.info("⏳ 等待所有图片上传完成...")
+            time.sleep(5)
+            
+            # 再次截图
+            page.screenshot(path="output/debug_after_upload.png")
+            logger.info("📷 上传后截图: output/debug_after_upload.png")
 
-            # 3. 填写标题
+            # 4. 填写标题 - 使用更宽松的选择器
             logger.info(f"✏️ 填写标题: {title}")
-            title_input = page.locator('#publish-container input[placeholder]')
-            title_input.click()
-            title_input.fill(title)
+            title_selectors = [
+                "input[placeholder*='标题']",
+                "input[placeholder*='填写']",
+                "#post-textarea",
+                ".title-input input",
+                "input.css-input",
+            ]
+            
+            title_filled = False
+            for selector in title_selectors:
+                try:
+                    elements = page.query_selector_all(selector)
+                    if elements:
+                        logger.info(f"  找到 {len(elements)} 个元素匹配: {selector}")
+                        # 使用第一个可见元素
+                        for elem in elements:
+                            if elem.is_visible():
+                                elem.click()
+                                time.sleep(0.5)
+                                elem.fill(title)
+                                logger.success("  ✅ 标题已填写")
+                                title_filled = True
+                                break
+                        if title_filled:
+                            break
+                except Exception as e:
+                    logger.debug(f"  尝试选择器 {selector} 失败: {e}")
+                    continue
+            
+            if not title_filled:
+                logger.error("❌ 未能填写标题")
+                page.screenshot(path="output/error_no_title_input.png")
 
-            # 4. 填写正文
+            # 5. 填写正文
             logger.info("✏️ 填写正文...")
             # 拼接正文和标签
             full_content = content
@@ -141,29 +214,77 @@ def publish_note(
                 tag_text = " ".join([f"#{tag}" for tag in tags])
                 full_content += f"\n\n{tag_text}"
 
-            content_editor = page.locator('#publish-container div[contenteditable="true"]')
-            content_editor.click()
-            # 使用 keyboard 逐步输入，模拟真实打字（避免被检测）
-            page.keyboard.type(full_content, delay=10)
+            content_selectors = [
+                "div[contenteditable='true']",
+                "textarea[placeholder*='正文']",
+                "#post-textarea",
+                ".content-input",
+            ]
+            
+            content_filled = False
+            for selector in content_selectors:
+                try:
+                    elements = page.query_selector_all(selector)
+                    if elements:
+                        logger.info(f"  找到 {len(elements)} 个内容输入元素: {selector}")
+                        for elem in elements:
+                            if elem.is_visible():
+                                elem.click()
+                                time.sleep(0.5)
+                                # 尝试不同的输入方法
+                                try:
+                                    elem.fill(full_content)
+                                except:
+                                    page.keyboard.type(full_content, delay=10)
+                                logger.success("  ✅ 正文已填写")
+                                content_filled = True
+                                break
+                        if content_filled:
+                            break
+                except Exception as e:
+                    logger.debug(f"  尝试选择器 {selector} 失败: {e}")
+                    continue
+            
+            if not content_filled:
+                logger.error("❌ 未能填写正文")
+                page.screenshot(path="output/error_no_content_input.png")
 
-            time.sleep(1)
+            time.sleep(2)
+            
+            # 最终截图
+            page.screenshot(path="output/debug_before_publish.png")
+            logger.info("📷 发布前截图: output/debug_before_publish.png")
 
-            # 5. 发布
+            # 6. 发布
             if dry_run:
                 logger.info("🧪 试运行模式，不执行发布。请检查浏览器中的内容。")
-                logger.info("⏳ 10 秒后关闭浏览器...")
-                time.sleep(10)
+                logger.info("⏳ 20 秒后关闭浏览器...")
+                time.sleep(20)
             else:
                 logger.info("📤 点击发布按钮...")
-                publish_btn = page.locator('button:has-text("发布")')
-                publish_btn.click()
-                time.sleep(3)
+                publish_selectors = [
+                    "button:has-text('发布')",
+                    ".publish-btn",
+                    "button[type='submit']",
+                ]
+                
+                for selector in publish_selectors:
+                    try:
+                        btn = page.query_selector(selector)
+                        if btn and btn.is_visible():
+                            btn.click()
+                            logger.success("✅ 已点击发布按钮")
+                            time.sleep(5)
+                            break
+                    except:
+                        continue
 
                 # 检查是否发布成功
                 if "publish" not in page.url.lower():
                     logger.success("🎉 笔记发布成功！")
                 else:
                     logger.warning("⚠️ 可能发布未成功，请检查页面状态")
+                    page.screenshot(path="output/after_publish.png")
 
             # 保存更新后的 Cookie
             context.storage_state(path=str(XHS_COOKIE_FILE))
@@ -171,6 +292,8 @@ def publish_note(
 
         except Exception as e:
             logger.error(f"❌ 发布过程出错: {e}")
+            import traceback
+            traceback.print_exc()
             # 截图保存错误现场
             error_screenshot = Path("output/error_screenshot.png")
             page.screenshot(path=str(error_screenshot))
